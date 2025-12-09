@@ -12,7 +12,7 @@ class SimpleLineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Line
-        fields = ('id', 'name')
+        fields = ('id', 'name', 'color')
 
 
 class RouteSerializer(serializers.ModelSerializer):
@@ -37,7 +37,7 @@ class LineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Line
-        fields = ('id', 'name', 'routes')
+        fields = ('id', 'name', 'routes', 'color')
 
 
 class StepTraceSerializer(serializers.Serializer):

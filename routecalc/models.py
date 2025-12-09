@@ -6,6 +6,7 @@ import pyproj
 
 class Line(models.Model):
     name = models.CharField("Nombre", max_length=5)
+    color = models.CharField(max_length=10)
 
     def __str__(self):
         return self.name
@@ -63,3 +64,11 @@ class Step(models.Model):
         res = f"{self.point.__str__()} -> "
         res += f"{self.next.point.__str__() if self.next is not None else ''}"
         return res
+
+    def distance_to_next_step(self):
+        if self.next is None:
+            return 0.0
+        p1_coords = self.point.__array__()
+        p2_coords = self.next.point.__array__()
+        distance = numpy.linalg.norm(p2_coords - p1_coords)
+        return float(distance)

@@ -1,10 +1,11 @@
+import heapq
 from django.shortcuts import get_object_or_404
 from rest_framework.response import Response
 from .models import Line, Point, Step, Route
 from rest_framework import viewsets
 from rest_framework.views import APIView
 from .serializers import LineSerializer, PointSerializer
-from .serializers import StepSerializer, RouteSerializer, StepTraceSerializer
+from .serializers import StepSerializer, RouteSerializer
 import numpy
 from scipy.spatial import KDTree
 from django.db.models import QuerySet
@@ -53,45 +54,84 @@ def TransfersOfPath(path: list[Step]) -> int:
     return transfers
 
 
-def TakeStep(
-    origin: Point,
-    destination: Point,
-    traversed: list[Step],
-    stepsTaken: list[Step]
-):
-    MAX_ALLOWED_TRANSFERS = 10
-    MAX_ACCEPTABLE_DISTANCE = 50
-    if stepsTaken.__len__() > 0:
-        return
-    if TransfersOfPath(traversed) > MAX_ALLOWED_TRANSFERS:
-        return
-    if origin is None:
-        return
-    if origin == destination:
-        stepsTaken.append(
-            StepTrace(
-                traversed.copy(),
-                LengthOfPath(traversed),
-                TransfersOfPath(traversed)
-            )
-        )
-        return
-    for step in origin.steps.all():
-        if step in traversed:
-            return
-        dest: Point = step.next.point if step.next is not None else None
-        traversed.append(step)
-        TakeStep(dest, destination, traversed, stepsTaken)
-        traversed.pop()
+def calculatePaths(
+    start_point_id: int,
+    end_point_id: int,
+    K: int = 3,
+    max_path_length: int = 100,
+    switch_cost: float = 0.0,
+) -> list[tuple[list[Step], float]]:
+    all_steps = Step.objects.select_related('point', 'next__point').all()
+    steps_by_point = {}
+    paths_found_at_step = {step.id: 0 for step in all_steps}
+    entry_count = 0
+    pq = []
+    for step in all_steps:
+        point_id = step.point.id
+        if point_id not in steps_by_point:
+            steps_by_point[point_id] = []
+        steps_by_point[point_id].append(step)
+    start_steps = steps_by_point.get(start_point_id, [])
+    if not start_steps:
+        return []
+    for step in start_steps:
+        heapq.heappush(pq, (0.0, entry_count, [step]))
+        entry_count += 1
+    k_results = []
+    while pq:
+        current_dist, _, current_path = heapq.heappop(pq)
+        current_step = current_path[-1]
+        current_step_id = current_step.id
+        if len(current_path) > max_path_length:
+            continue
+        if current_step.point.id == end_point_id:
+            k_results.append((current_path, current_dist))
+            if len(k_results) >= K:
+                break
+        paths_found_at_step[current_step_id] += 1
+        if paths_found_at_step[current_step_id] > K * 2:
+            continue
+        if current_step.next:
+            neighbor = current_step.next
+            weight = current_step.distance_to_next_step()
+            new_distance = current_dist + weight
+            new_path = current_path + [neighbor]
+            if neighbor not in current_path:
+                heapq.heappush(pq, (new_distance, entry_count, new_path))
+                entry_count += 1
+        for switch_neighbor in steps_by_point.get(current_step.point.id, []):
+            if switch_neighbor.id == current_step_id:
+                continue
+            new_distance = current_dist + switch_cost
+            new_path = current_path + [switch_neighbor]
+            if switch_neighbor not in current_path:
+                heapq.heappush(pq, (new_distance, entry_count, new_path))
+                entry_count += 1
+    return k_results
 
 
-def CalculatePaths(origin: Point, destination: Point):
-    lastOrigin = origin
-    lastDestination = destination
-    stepsTaken: list[StepTrace] = []
-    if (lastOrigin is not None and lastDestination is not None):
-        TakeStep(lastOrigin, lastDestination, [], stepsTaken)
-    return stepsTaken
+def convertBestPathsToResponse(bestPaths):
+    result = []
+    for tup in bestPaths:
+        currentRoute = None
+        l, dis = tup
+        l: list[Step] = l
+        segments = []
+        currentSegment = {}
+        currentSteps = []
+        for step in l:
+            if currentRoute is None:
+                currentRoute = step.route
+                currentSegment["route"] = RouteSerializer(step.route).data
+            if currentRoute != step.route:
+                currentSegment["path"] = currentSteps
+                segments.append(currentSegment)
+                currentSegment = {"route": RouteSerializer(step.route).data}
+                currentSteps = []
+                currentRoute = step.route
+            currentSteps.append(PointSerializer(step.point).data)
+        result.append({"distance": dis, "segments": segments})
+    return result
 
 
 def RenderRoute(route: Route):
@@ -139,6 +179,7 @@ class LineRoutesView(APIView):
             renderedRoutes.append({
                 "id": route.id,
                 "lineName": route.line.name,
+                "lineColor": route.line.color,
                 "isReturn": route.isReturn,
                 "distance": route.distance,
                 "time": route.time,
@@ -183,8 +224,9 @@ class BestRoutesView(APIView):
         destination = Point(x_coord=d_x, y_coord=d_y)
         points = Point.objects.filter(
             steps__isnull=False).distinct().all()
-        originmatch = ClosestPoint(points, origin)
-        destinationmatch = ClosestPoint(points, destination)
-        paths = CalculatePaths(originmatch, destinationmatch)
-        response = StepTraceSerializer(paths, many=True)
-        return Response(response.data)
+        o = ClosestPoint(points, origin)
+        d = ClosestPoint(points, destination)
+        result = calculatePaths(o.id, d.id)
+        renderedResult = convertBestPathsToResponse(result)
+        print(renderedResult)
+        return Response(renderedResult)
