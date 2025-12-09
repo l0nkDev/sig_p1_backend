@@ -28,8 +28,9 @@ class StepTrace:
 
 def ClosestPoint(points: QuerySet[Point], point: Point) -> Point:
     nparray = numpy.array(points)
+    print(nparray)
     tree = KDTree(nparray)
-    _, index = tree.query(point)
+    _, index = tree.query(point.__array__())
     return points[int(index)]
 
 
@@ -54,59 +55,156 @@ def TransfersOfPath(path: list[Step]) -> int:
     return transfers
 
 
+def reconstruct_path(end_step_id, predecessors, step_map):
+    path = []
+    current_id = end_step_id
+    while current_id is not None:
+        step = step_map[current_id]
+        path.append(step)
+        current_id = predecessors.get(current_id)
+    path.reverse()
+    return path
+
+# Helper function to find one best path (Dijkstra's with tie-breaker)
+
+
+def find_best_path(start_steps, end_point_id, steps_by_point, step_map, switch_cost, penalized_edges):
+    # Priority Queue stores: (distance, switches, entry_count, step_id)
+    # distance and switches form the lexicographical cost.
+    pq = []
+
+    # distances stores the current best cost to reach a step: (distance, switches)
+    distances = {step_id: (float('inf'), float('inf'))
+                 for step_id in step_map.keys()}
+    predecessors = {}
+    entry_count = 0
+
+    for step in start_steps:
+        cost = (0.0, 0)
+        distances[step.id] = cost
+        heapq.heappush(pq, (0.0, 0, entry_count, step.id))
+        entry_count += 1
+
+    # A large penalty to ensure a penalized edge is always avoided
+    EDGE_PENALTY = 10000.0
+
+    while pq:
+        # Unpack: distance, switches, _, step_id
+        current_dist, current_switches, _, current_step_id = heapq.heappop(pq)
+
+        current_cost = (current_dist, current_switches)
+        current_step = step_map[current_step_id]
+
+        if current_dist > distances[current_step_id][0] and current_switches > distances[current_step_id][1]:
+            continue
+
+        if current_step.point.id == end_point_id:
+            return reconstruct_path(current_step_id, predecessors, step_map), current_dist
+
+        # 1. Intra-Route Neighbor
+        if current_step.next:
+            neighbor = current_step.next
+            weight = current_step.distance_to_next_step()
+
+            # Apply penalty if this edge was in a previous best path
+            edge_key = (current_step_id, neighbor.id)
+            if edge_key in penalized_edges:
+                weight += EDGE_PENALTY
+
+            new_dist = current_dist + weight
+            new_switches = current_switches
+            new_cost = (new_dist, new_switches)
+
+            if new_cost < distances[neighbor.id]:
+                distances[neighbor.id] = new_cost
+                predecessors[neighbor.id] = current_step_id
+
+                heapq.heappush(pq, (new_dist, new_switches,
+                               entry_count, neighbor.id))
+                entry_count += 1
+
+        # 2. Inter-Route Neighbors (Switches at the same point)
+        for switch_neighbor in steps_by_point.get(current_step.point.id, []):
+            if switch_neighbor.id == current_step_id:
+                continue
+
+            # Note: Switch cost is non-zero to prefer intra-route movement.
+            new_dist = current_dist + switch_cost
+            new_switches = current_switches + 1
+            new_cost = (new_dist, new_switches)
+
+            if new_cost < distances[switch_neighbor.id]:
+                distances[switch_neighbor.id] = new_cost
+                predecessors[switch_neighbor.id] = current_step_id
+
+                heapq.heappush(pq, (new_dist, new_switches,
+                               entry_count, switch_neighbor.id))
+                entry_count += 1
+
+    return None, 0.0  # No path found
+
+
 def calculatePaths(
     start_point_id: int,
     end_point_id: int,
     K: int = 3,
-    max_path_length: int = 100,
-    switch_cost: float = 0.0,
-) -> list[tuple[list[Step], float]]:
-    all_steps = Step.objects.select_related('point', 'next__point').all()
+    switch_cost: float = 0.001,  # Set to a small non-zero value for tie-breaking
+) -> list[tuple[list, float]]:
+
+    # 1. Graph Construction (runs once)
+    # Using .all() ensures all necessary steps are fetched together
+    all_steps = list(Step.objects.select_related(
+        'point', 'next__point', 'route').all())
+    step_map = {step.id: step for step in all_steps}
     steps_by_point = {}
-    paths_found_at_step = {step.id: 0 for step in all_steps}
-    entry_count = 0
-    pq = []
+
     for step in all_steps:
         point_id = step.point.id
         if point_id not in steps_by_point:
             steps_by_point[point_id] = []
         steps_by_point[point_id].append(step)
+
     start_steps = steps_by_point.get(start_point_id, [])
     if not start_steps:
         return []
-    for step in start_steps:
-        heapq.heappush(pq, (0.0, entry_count, [step]))
-        entry_count += 1
+
     k_results = []
-    while pq:
-        current_dist, _, current_path = heapq.heappop(pq)
-        current_step = current_path[-1]
-        current_step_id = current_step.id
-        if len(current_path) > max_path_length:
-            continue
-        if current_step.point.id == end_point_id:
-            k_results.append((current_path, current_dist))
-            if len(k_results) >= K:
-                break
-        paths_found_at_step[current_step_id] += 1
-        if paths_found_at_step[current_step_id] > K * 2:
-            continue
-        if current_step.next:
-            neighbor = current_step.next
-            weight = current_step.distance_to_next_step()
-            new_distance = current_dist + weight
-            new_path = current_path + [neighbor]
-            if neighbor not in current_path:
-                heapq.heappush(pq, (new_distance, entry_count, new_path))
-                entry_count += 1
-        for switch_neighbor in steps_by_point.get(current_step.point.id, []):
-            if switch_neighbor.id == current_step_id:
-                continue
-            new_distance = current_dist + switch_cost
-            new_path = current_path + [switch_neighbor]
-            if switch_neighbor not in current_path:
-                heapq.heappush(pq, (new_distance, entry_count, new_path))
-                entry_count += 1
+    penalized_edges = set()
+
+    # 2. Iterative Search for K unique paths
+    for _ in range(K * 2):  # Iterate more than K times to ensure K unique paths are found
+        path, distance = find_best_path(
+            start_steps,
+            end_point_id,
+            steps_by_point,
+            step_map,
+            switch_cost,
+            penalized_edges
+        )
+
+        if not path:
+            break
+
+        # Check if this path is already in the results (avoid near-identical paths)
+        path_ids = tuple(s.id for s in path)
+        if any(tuple(s.id for s in res[0]) == path_ids for res in k_results):
+            # If the path is identical, just penalize the edges and continue
+            pass
+        else:
+            k_results.append((path, distance))
+
+        # Add edges of the found path to the penalty set for the next run
+        for i in range(len(path) - 1):
+            source_step = path[i]
+            dest_step = path[i+1]
+
+            # ONLY penalize intra-route movements (the main travel edges)
+            if source_step.route.id == dest_step.route.id:
+                penalized_edges.add((source_step.id, dest_step.id))
+
+        if len(k_results) >= K:
+            break
+
     return k_results
 
 
@@ -226,7 +324,8 @@ class BestRoutesView(APIView):
             steps__isnull=False).distinct().all()
         o = ClosestPoint(points, origin)
         d = ClosestPoint(points, destination)
+        print(o)
+        print(d)
         result = calculatePaths(o.id, d.id)
         renderedResult = convertBestPathsToResponse(result)
-        print(renderedResult)
         return Response(renderedResult)
