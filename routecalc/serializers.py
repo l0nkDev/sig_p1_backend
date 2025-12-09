@@ -1,11 +1,5 @@
 from rest_framework import serializers
-from .models import Line, Route, Path, Point
-
-
-class LineSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Line
-        fields = ('name', 'routes')
+from .models import Line, Route, Step, Point
 
 
 class PointSerializer(serializers.ModelSerializer):
@@ -14,13 +8,39 @@ class PointSerializer(serializers.ModelSerializer):
         fields = ('x_coord', 'y_coord')
 
 
-class PathSerializer(serializers.ModelSerializer):
+class SimpleLineSerializer(serializers.ModelSerializer):
+
     class Meta:
-        model = Path
-        fields = ('origin', 'destination', 'line')
+        model = Line
+        fields = ('id', 'name')
 
 
 class RouteSerializer(serializers.ModelSerializer):
+    line = SimpleLineSerializer()
+
     class Meta:
         model = Route
-        fields = ('line', 'direction', 'starting_point')
+        fields = ('id', 'isReturn', 'distance', 'time', 'line')
+
+
+class StepSerializer(serializers.ModelSerializer):
+    point = PointSerializer()
+    route = RouteSerializer()
+
+    class Meta:
+        model = Step
+        fields = ('route', 'point')
+
+
+class LineSerializer(serializers.ModelSerializer):
+    routes = RouteSerializer(many=True)
+
+    class Meta:
+        model = Line
+        fields = ('id', 'name', 'routes')
+
+
+class StepTraceSerializer(serializers.Serializer):
+    steps = StepSerializer(many=True)
+    length = serializers.FloatField()
+    transfers = serializers.IntegerField()
