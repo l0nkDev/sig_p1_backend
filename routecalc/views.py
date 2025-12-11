@@ -28,7 +28,6 @@ class StepTrace:
 
 def ClosestPoint(points: QuerySet[Point], point: Point) -> Point:
     nparray = numpy.array(points)
-    print(nparray)
     tree = KDTree(nparray)
     _, index = tree.query(point.__array__())
     return points[int(index)]
@@ -68,12 +67,12 @@ def reconstruct_path(end_step_id, predecessors, step_map):
 # Helper function to find one best path (Dijkstra's with tie-breaker)
 
 
-def find_best_path(start_steps, end_point_id, steps_by_point, step_map, switch_cost, penalized_edges):
+def find_best_path(start_steps, end_point_id, steps_by_point, step_map,
+                   switch_cost, penalized_edges):
     # Priority Queue stores: (distance, switches, entry_count, step_id)
     # distance and switches form the lexicographical cost.
     pq = []
 
-    # distances stores the current best cost to reach a step: (distance, switches)
     distances = {step_id: (float('inf'), float('inf'))
                  for step_id in step_map.keys()}
     predecessors = {}
@@ -92,14 +91,16 @@ def find_best_path(start_steps, end_point_id, steps_by_point, step_map, switch_c
         # Unpack: distance, switches, _, step_id
         current_dist, current_switches, _, current_step_id = heapq.heappop(pq)
 
-        current_cost = (current_dist, current_switches)
+        # current_cost = (current_dist, current_switches)
         current_step = step_map[current_step_id]
 
-        if current_dist > distances[current_step_id][0] and current_switches > distances[current_step_id][1]:
+        if (current_dist > distances[current_step_id][0] and
+                current_switches > distances[current_step_id][1]):
             continue
 
         if current_step.point.id == end_point_id:
-            return reconstruct_path(current_step_id, predecessors, step_map), current_dist
+            return reconstruct_path(current_step_id,
+                                    predecessors, step_map), current_dist
 
         # 1. Intra-Route Neighbor
         if current_step.next:
@@ -148,11 +149,9 @@ def calculatePaths(
     start_point_id: int,
     end_point_id: int,
     K: int = 3,
-    switch_cost: float = 0.001,  # Set to a small non-zero value for tie-breaking
+    switch_cost: float = 0.001,
 ) -> list[tuple[list, float]]:
 
-    # 1. Graph Construction (runs once)
-    # Using .all() ensures all necessary steps are fetched together
     all_steps = list(Step.objects.select_related(
         'point', 'next__point', 'route').all())
     step_map = {step.id: step for step in all_steps}
@@ -172,7 +171,7 @@ def calculatePaths(
     penalized_edges = set()
 
     # 2. Iterative Search for K unique paths
-    for _ in range(K * 2):  # Iterate more than K times to ensure K unique paths are found
+    for _ in range(K * 2):
         path, distance = find_best_path(
             start_steps,
             end_point_id,
@@ -184,8 +183,6 @@ def calculatePaths(
 
         if not path:
             break
-
-        # Check if this path is already in the results (avoid near-identical paths)
         path_ids = tuple(s.id for s in path)
         if any(tuple(s.id for s in res[0]) == path_ids for res in k_results):
             # If the path is identical, just penalize the edges and continue
@@ -228,6 +225,10 @@ def convertBestPathsToResponse(bestPaths):
                 currentSteps = []
                 currentRoute = step.route
             currentSteps.append(PointSerializer(step.point).data)
+        currentSegment["path"] = currentSteps
+        segments.append(currentSegment)
+        currentSegment = {"route": RouteSerializer(step.route).data}
+        currentSteps.append(PointSerializer(step.point).data)
         result.append({"distance": dis, "segments": segments})
     return result
 
@@ -324,8 +325,6 @@ class BestRoutesView(APIView):
             steps__isnull=False).distinct().all()
         o = ClosestPoint(points, origin)
         d = ClosestPoint(points, destination)
-        print(o)
-        print(d)
-        result = calculatePaths(o.id, d.id)
+        result = calculatePaths(o.id, d.id, 5)
         renderedResult = convertBestPathsToResponse(result)
         return Response(renderedResult)

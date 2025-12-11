@@ -1,7 +1,6 @@
 from django.db import models
 import numpy
 from pyproj import Transformer
-import pyproj
 
 
 class Line(models.Model):
