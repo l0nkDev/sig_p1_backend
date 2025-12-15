@@ -85,7 +85,7 @@ def find_best_path(start_steps, end_point_id, steps_by_point, step_map,
         entry_count += 1
 
     # A large penalty to ensure a penalized edge is always avoided
-    EDGE_PENALTY = 10000.0
+    EDGE_PENALTY = 100000.0
 
     while pq:
         # Unpack: distance, switches, _, step_id
@@ -205,6 +205,12 @@ def calculatePaths(
     return k_results
 
 
+def removePenalties(distance: float) -> float:
+    EDGE_PENALTY = 100000.0
+    num_penalties = int(distance // EDGE_PENALTY)
+    return distance - (num_penalties * EDGE_PENALTY)
+
+
 def convertBestPathsToResponse(bestPaths):
     result = []
     for tup in bestPaths:
@@ -229,7 +235,7 @@ def convertBestPathsToResponse(bestPaths):
         segments.append(currentSegment)
         currentSegment = {"route": RouteSerializer(step.route).data}
         currentSteps.append(PointSerializer(step.point).data)
-        result.append({"distance": dis, "segments": segments})
+        result.append({"distance": removePenalties(dis), "segments": segments})
     return result
 
 
