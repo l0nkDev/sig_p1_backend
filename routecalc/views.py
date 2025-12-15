@@ -211,7 +211,7 @@ def removePenalties(distance: float) -> float:
     return distance - (num_penalties * EDGE_PENALTY)
 
 
-def convertBestPathsToResponse(bestPaths):
+def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
     result = []
     for tup in bestPaths:
         currentRoute = None
@@ -220,6 +220,16 @@ def convertBestPathsToResponse(bestPaths):
         segments = []
         currentSegment = {}
         currentSteps = []
+        walkingroute = Route(
+            line=Line(name="L000", color="#000000"),
+            isReturn=False,
+            distance=0,
+            time=0
+        )
+        originToPoint = {"route": RouteSerializer(walkingroute).data,
+                         "path": [PointSerializer(Point(x_coord=o_x,
+                                                        y_coord=o_y)).data,
+                                  PointSerializer(l[0].point).data]}
         for step in l:
             if currentRoute is None:
                 currentRoute = step.route
@@ -235,7 +245,13 @@ def convertBestPathsToResponse(bestPaths):
         segments.append(currentSegment)
         currentSegment = {"route": RouteSerializer(step.route).data}
         currentSteps.append(PointSerializer(step.point).data)
-        result.append({"distance": removePenalties(dis), "segments": segments})
+        destinationToPoint = {"route": RouteSerializer(walkingroute).data,
+                              "path": [PointSerializer(l[-1].point).data,
+                                       PointSerializer(
+                                           Point(x_coord=d_x,
+                                                 y_coord=d_y)).data]}
+        result.append({"distance": removePenalties(
+            dis), "segments": originToPoint + segments + destinationToPoint})
     return result
 
 
@@ -332,29 +348,5 @@ class BestRoutesView(APIView):
         o = ClosestPoint(points, origin)
         d = ClosestPoint(points, destination)
         result = calculatePaths(o.id, d.id, 5)
-        walkingroute = Route(
-            line=Line(name="L000", color="#000000"),
-            isReturn=False,
-            distance=0,
-            time=0
-        )
-        fromOriginToClosest = {
-            "distance": DistanceBetween(origin, o),
-            "segments": [{
-                "route": RouteSerializer(walkingroute).data,
-                "path": [PointSerializer(origin).data,
-                         PointSerializer(o).data]
-            }]
-        }
-        fromDestToClosest = {
-            "distance": DistanceBetween(destination, d),
-            "segments": [{
-                "route": RouteSerializer(walkingroute).data,
-                "path": [PointSerializer(d).data,
-                         PointSerializer(destination).data]
-            }]
-        }
-        renderedResult = ([fromOriginToClosest] +
-                          convertBestPathsToResponse(result) +
-                          [fromDestToClosest])
+        renderedResult = convertBestPathsToResponse(result, o_x, o_y, d_x, d_y)
         return Response(renderedResult)
