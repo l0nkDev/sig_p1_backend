@@ -9,6 +9,7 @@ from .serializers import StepSerializer, RouteSerializer
 import numpy
 from scipy.spatial import KDTree
 from django.db.models import QuerySet
+from .spatial_index import PointSpatialIndex
 
 
 class StepTrace:
@@ -33,25 +34,20 @@ def ClosestPoint(points: QuerySet[Point], point: Point) -> Point:
     return points[int(index)]
 
 
+def ClosestPoints(points_qs, target_point, radius=50.0) -> list:
+    points_list = list(points_qs)
+    if not points_list:
+        return []
+    coords = numpy.array([p.__array__() for p in points_list])
+    tree = KDTree(coords)
+    target_coords = target_point.__array__()
+    indices = tree.query_ball_point(target_coords, radius)
+    nearby_points = [points_list[i] for i in indices]
+    return nearby_points
+
+
 def DistanceBetween(point_a: Point, point_b: Point) -> float:
     return numpy.linalg.norm(point_a.__array__() - point_b.__array__())
-
-
-def LengthOfPath(path: list[Step]) -> float:
-    length: float = 0
-    for p in path:
-        length += DistanceBetween(p.point, p.next.point)
-    return length
-
-
-def TransfersOfPath(path: list[Step]) -> int:
-    transfers: int = 0
-    currentLine: Line | None = None
-    for p in path:
-        if currentLine is not None and currentLine is not p.route.line:
-            transfers += 1
-        currentLine = p.route.line
-    return transfers
 
 
 def reconstruct_path(end_step_id, predecessors, step_map):
@@ -67,7 +63,7 @@ def reconstruct_path(end_step_id, predecessors, step_map):
 # Helper function to find one best path (Dijkstra's with tie-breaker)
 
 
-def find_best_path(start_steps, end_point_id, steps_by_point, step_map,
+def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
                    switch_cost, penalized_edges):
     # Priority Queue stores: (distance, switches, entry_count, step_id)
     # distance and switches form the lexicographical cost.
@@ -98,7 +94,7 @@ def find_best_path(start_steps, end_point_id, steps_by_point, step_map,
                 current_switches > distances[current_step_id][1]):
             continue
 
-        if current_step.point.id == end_point_id:
+        if current_step.point.id in end_point_ids:
             return reconstruct_path(current_step_id,
                                     predecessors, step_map), current_dist
 
@@ -146,8 +142,8 @@ def find_best_path(start_steps, end_point_id, steps_by_point, step_map,
 
 
 def calculatePaths(
-    start_point_id: int,
-    end_point_id: int,
+    start_point_ids: list[int],
+    end_point_ids: list[int],
     K: int = 3,
     switch_cost: float = 0.001,
 ) -> list[tuple[list, float]]:
@@ -163,10 +159,12 @@ def calculatePaths(
             steps_by_point[point_id] = []
         steps_by_point[point_id].append(step)
 
-    start_steps = steps_by_point.get(start_point_id, [])
+    start_steps = []
+    for point_id in start_point_ids:
+        start_steps.extend(steps_by_point.get(point_id, []))
     if not start_steps:
         return []
-
+    end_point_set = set(end_point_ids)
     k_results = []
     penalized_edges = set()
 
@@ -174,7 +172,7 @@ def calculatePaths(
     for _ in range(K * 2):
         path, distance = find_best_path(
             start_steps,
-            end_point_id,
+            end_point_set,
             steps_by_point,
             step_map,
             switch_cost,
@@ -345,10 +343,15 @@ class BestRoutesView(APIView):
         d_y = float(d_y.replace(',', '.'))
         origin = Point(x_coord=o_x, y_coord=o_y)
         destination = Point(x_coord=d_x, y_coord=d_y)
-        points = Point.objects.filter(
-            steps__isnull=False).distinct().all()
-        o = ClosestPoint(points, origin)
-        d = ClosestPoint(points, destination)
-        result = calculatePaths(o.id, d.id, 5)
+        points = PointSpatialIndex()
+        o_l = points.query_radius(origin, radius_meters=50.0)
+        d_l = points.query_radius(destination, radius_meters=50.0)
+        if o_l.__len__() == 0:
+            o = points.query(origin)
+            o_l = [o]
+        if d_l.__len__() == 0:
+            d = points.query(destination)
+            d_l = [d]
+        result = calculatePaths(o_l, d_l, 5)
         renderedResult = convertBestPathsToResponse(result, o_x, o_y, d_x, d_y)
         return Response(renderedResult)

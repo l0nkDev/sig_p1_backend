@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-xk-3gie-20-f-(4hgtfc9!8=226ompy(^@te#i(8nxw7s6m+'
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['aws.lonk.dev']
+ALLOWED_HOSTS = ['0.0.0.0', 'localhost']
 
 
 # Application definition

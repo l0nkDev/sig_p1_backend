@@ -2,6 +2,9 @@ from django.db import models
 import numpy
 from pyproj import Transformer
 
+GLOBAL_TRANSFORMER = Transformer.from_crs("EPSG:4326", "EPSG:32720",
+                                          always_xy=True)
+
 
 class Line(models.Model):
     name = models.CharField("Nombre", max_length=5)
@@ -19,8 +22,7 @@ class Point(models.Model):
         return f"({self.x_coord}, {self.y_coord})"
 
     def __array__(self) -> numpy.ndarray:
-        transformer = Transformer.from_crs(
-            "EPSG:4326", "EPSG:32720", always_xy=True)
+        transformer = GLOBAL_TRANSFORMER
         x_coord, y_coord = transformer.transform(self.x_coord, self.y_coord)
         return numpy.array([x_coord, y_coord], dtype=float)
 
