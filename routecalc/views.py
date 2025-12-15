@@ -318,8 +318,8 @@ class BestRoutesView(APIView):
         origin = Point(x_coord=o_x, y_coord=o_y)
         destination = Point(x_coord=d_x, y_coord=d_y)
         points = PointSpatialIndex()
-        o_l = points.query_radius(origin, radius_meters=400.0)
-        d_l = points.query_radius(destination, radius_meters=400.0)
+        o_l = points.query_radius(origin, radius_meters=50.0)
+        d_l = points.query_radius(destination, radius_meters=50.0)
         if not o_l:
             o = points.query(origin)
             o_l = [o]
