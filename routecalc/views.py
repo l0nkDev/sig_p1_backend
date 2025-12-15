@@ -332,5 +332,29 @@ class BestRoutesView(APIView):
         o = ClosestPoint(points, origin)
         d = ClosestPoint(points, destination)
         result = calculatePaths(o.id, d.id, 5)
-        renderedResult = convertBestPathsToResponse(result)
+        walkingroute = Route(
+            line=Line(name="L000", color="#000000"),
+            isReturn=False,
+            distance=0,
+            time=0
+        )
+        fromOriginToClosest = {
+            "distance": DistanceBetween(origin, o),
+            "segments": [{
+                "route": RouteSerializer(walkingroute).data,
+                "path": [PointSerializer(origin).data,
+                         PointSerializer(o).data]
+            }]
+        }
+        fromDestToClosest = {
+            "distance": DistanceBetween(destination, d),
+            "segments": [{
+                "route": RouteSerializer(walkingroute).data,
+                "path": [PointSerializer(d).data,
+                         PointSerializer(destination).data]
+            }]
+        }
+        renderedResult = ([fromOriginToClosest] +
+                          convertBestPathsToResponse(result) +
+                          [fromDestToClosest])
         return Response(renderedResult)
