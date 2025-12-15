@@ -60,105 +60,81 @@ def reconstruct_path(end_step_id, predecessors, step_map):
     path.reverse()
     return path
 
-# Helper function to find one best path (Dijkstra's with tie-breaker)
-
 
 def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
-                   switch_cost, penalized_edges):
-    # Priority Queue stores: (distance, switches, entry_count, step_id)
-    # distance and switches form the lexicographical cost.
+                   switch_cost, penalized_edges, start_costs, end_costs):
     pq = []
-
     distances = {step_id: (float('inf'), float('inf'))
                  for step_id in step_map.keys()}
     predecessors = {}
     entry_count = 0
-
     for step in start_steps:
-        cost = (0.0, 0)
+        walk_cost = start_costs.get(step.point.id, 0.0)
+        cost = (walk_cost, 0)
         distances[step.id] = cost
-        heapq.heappush(pq, (0.0, 0, entry_count, step.id))
+        heapq.heappush(pq, (walk_cost, 0, entry_count, step.id))
         entry_count += 1
-
-    # A large penalty to ensure a penalized edge is always avoided
     EDGE_PENALTY = 100000.0
-
     while pq:
-        # Unpack: distance, switches, _, step_id
         current_dist, current_switches, _, current_step_id = heapq.heappop(pq)
-
-        # current_cost = (current_dist, current_switches)
         current_step = step_map[current_step_id]
-
         if (current_dist > distances[current_step_id][0] and
                 current_switches > distances[current_step_id][1]):
             continue
-
         if current_step.point.id in end_point_ids:
-            return reconstruct_path(current_step_id,
-                                    predecessors, step_map), current_dist
-
-        # 1. Intra-Route Neighbor
+            final_walk = end_costs.get(current_step.point.id, 0.0)
+            total_dist = current_dist + final_walk
+            path = reconstruct_path(current_step_id, predecessors, step_map)
+            start_point_id = path[0].point.id
+            end_point_id = current_step.point.id
+            return path, total_dist, start_point_id, end_point_id
         if current_step.next:
             neighbor = current_step.next
             weight = current_step.distance_to_next_step()
-
-            # Apply penalty if this edge was in a previous best path
             edge_key = (current_step_id, neighbor.id)
             if edge_key in penalized_edges:
                 weight += EDGE_PENALTY
-
             new_dist = current_dist + weight
             new_switches = current_switches
             new_cost = (new_dist, new_switches)
-
             if new_cost < distances[neighbor.id]:
                 distances[neighbor.id] = new_cost
                 predecessors[neighbor.id] = current_step_id
-
                 heapq.heappush(pq, (new_dist, new_switches,
                                entry_count, neighbor.id))
                 entry_count += 1
-
-        # 2. Inter-Route Neighbors (Switches at the same point)
         for switch_neighbor in steps_by_point.get(current_step.point.id, []):
             if switch_neighbor.id == current_step_id:
                 continue
-
-            # Note: Switch cost is non-zero to prefer intra-route movement.
             new_dist = current_dist + switch_cost
             new_switches = current_switches + 1
             new_cost = (new_dist, new_switches)
-
             if new_cost < distances[switch_neighbor.id]:
                 distances[switch_neighbor.id] = new_cost
                 predecessors[switch_neighbor.id] = current_step_id
-
                 heapq.heappush(pq, (new_dist, new_switches,
                                entry_count, switch_neighbor.id))
                 entry_count += 1
-
-    return None, 0.0  # No path found
+    return None, 0.0, None, None
 
 
 def calculatePaths(
     start_point_ids: list[int],
     end_point_ids: list[int],
+    start_costs: dict,
+    end_costs: dict,
     K: int = 3,
     switch_cost: float = 0.001,
 ) -> list[tuple[list, float]]:
-
     all_steps = list(Step.objects.select_related(
         'point', 'next__point', 'route').all())
     step_map = {step.id: step for step in all_steps}
     steps_by_point = {}
-
     for step in all_steps:
         point_id = step.point.id
         if point_id not in steps_by_point:
             steps_by_point[point_id] = []
         steps_by_point[point_id].append(step)
-
     start_steps = []
     for point_id in start_point_ids:
         start_steps.extend(steps_by_point.get(point_id, []))
@@ -167,39 +143,38 @@ def calculatePaths(
     end_point_set = set(end_point_ids)
     k_results = []
     penalized_edges = set()
-
-    # 2. Iterative Search for K unique paths
+    current_start_costs = start_costs.copy()
+    current_end_costs = end_costs.copy()
+    POINT_REUSE_PENALTY = 100000.0
     for _ in range(K * 2):
-        path, distance = find_best_path(
+        path, distance, s_id, e_id = find_best_path(
             start_steps,
             end_point_set,
             steps_by_point,
             step_map,
             switch_cost,
-            penalized_edges
+            penalized_edges,
+            current_start_costs,
+            current_end_costs
         )
-
         if not path:
             break
         path_ids = tuple(s.id for s in path)
         if any(tuple(s.id for s in res[0]) == path_ids for res in k_results):
-            # If the path is identical, just penalize the edges and continue
             pass
         else:
             k_results.append((path, distance))
-
-        # Add edges of the found path to the penalty set for the next run
+            if s_id in current_start_costs:
+                current_start_costs[s_id] += POINT_REUSE_PENALTY
+            if e_id in current_end_costs:
+                current_end_costs[e_id] += POINT_REUSE_PENALTY
         for i in range(len(path) - 1):
             source_step = path[i]
             dest_step = path[i+1]
-
-            # ONLY penalize intra-route movements (the main travel edges)
             if source_step.route.id == dest_step.route.id:
                 penalized_edges.add((source_step.id, dest_step.id))
-
         if len(k_results) >= K:
             break
-
     return k_results
 
 
@@ -352,14 +327,18 @@ class BestRoutesView(APIView):
         origin = Point(x_coord=o_x, y_coord=o_y)
         destination = Point(x_coord=d_x, y_coord=d_y)
         points = PointSpatialIndex()
-        o_l = points.query_radius(origin, radius_meters=50.0)
-        d_l = points.query_radius(destination, radius_meters=50.0)
+        o_l = points.query_radius(origin, radius_meters=300.0)
+        d_l = points.query_radius(destination, radius_meters=300.0)
         if o_l.__len__() == 0:
             o = points.query(origin)
             o_l = [o]
         if d_l.__len__() == 0:
             d = points.query(destination)
             d_l = [d]
-        result = calculatePaths(o_l, d_l, 5)
+        start_costs = {p.id: DistanceBetween(origin, p) for p in o_l}
+        end_costs = {p.id: DistanceBetween(destination, p) for p in d_l}
+        start_ids = [p.id for p in o_l]
+        end_ids = [p.id for p in d_l]
+        result = calculatePaths(start_ids, end_ids, start_costs, end_costs, 5)
         renderedResult = convertBestPathsToResponse(result, o_x, o_y, d_x, d_y)
         return Response(renderedResult)

@@ -42,7 +42,9 @@ class PointSpatialIndex:
         indices = self._tree.query_ball_point([target_x, target_y],
                                               radius_meters)
         found_ids = self._point_ids[indices].tolist()
-        return found_ids
+        if not found_ids:
+            return []
+        return list(Point.objects.filter(id__in=found_ids))
 
     def query(self, target_point_obj):
         if self._tree is None:
@@ -53,4 +55,4 @@ class PointSpatialIndex:
         )
         _, index = self._tree.query([target_x, target_y], k=1)
         found_id = self._point_ids[index]
-        return found_id
+        return Point.objects.get(id=found_id)
