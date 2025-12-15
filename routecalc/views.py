@@ -218,13 +218,21 @@ def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
         segments = []
         currentSegment = {}
         currentSteps = []
-        walkingroute = Route(
-            line=Line(name="L000", color="#000000"),
+        walkingrouteOr = Route(
+            id=999,
+            line=Line(id=998, name="L000", color="#000000"),
             isReturn=False,
             distance=0,
             time=0
         )
-        originToPoint = {"route": RouteSerializer(walkingroute).data,
+        walkingrouteDes = Route(
+            id=1001,
+            line=Line(id=1000, name="L000", color="#000000"),
+            isReturn=False,
+            distance=0,
+            time=0
+        )
+        originToPoint = {"route": RouteSerializer(walkingrouteOr).data,
                          "path": [PointSerializer(Point(x_coord=o_x,
                                                         y_coord=o_y)).data,
                                   PointSerializer(l[0].point).data]}
@@ -243,7 +251,7 @@ def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
         segments.append(currentSegment)
         currentSegment = {"route": RouteSerializer(step.route).data}
         currentSteps.append(PointSerializer(step.point).data)
-        destinationToPoint = {"route": RouteSerializer(walkingroute).data,
+        destinationToPoint = {"route": RouteSerializer(walkingrouteDes).data,
                               "path": [PointSerializer(l[-1].point).data,
                                        PointSerializer(
                                            Point(x_coord=d_x,
