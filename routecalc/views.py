@@ -12,21 +12,6 @@ from django.db.models import QuerySet
 from .spatial_index import PointSpatialIndex
 
 
-class StepTrace:
-    def __init__(
-        self,
-        steps: list[Step] = [],
-        length: float = 0,
-        transfers: int = 0
-    ):
-        self.steps = steps
-        self.length = length
-        self.transfers = transfers
-
-    def __repr__(self):
-        return f"{{{self.steps}, {self.length}, {self.transfers} }}"
-
-
 def ClosestPoint(points: QuerySet[Point], point: Point) -> Point:
     nparray = numpy.array(points)
     tree = KDTree(nparray)
@@ -92,7 +77,6 @@ def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
                                         step_map)
                 best_result = (path, total_dist, path[0].point.id,
                                current_step.point.id)
-            continue
         if current_step.next:
             neighbor = current_step.next
             weight = current_step.distance_to_next_step()
@@ -171,9 +155,7 @@ def calculatePaths(
             real_distance = start_costs.get(s_id, 0.0)
             for i in range(len(path) - 1):
                 real_distance += path[i].distance_to_next_step()
-                if path[i].route.id != path[i+1].route.id:
-                    pass
-            real_distance += end_costs.get(e_id, 0.0)     
+            real_distance += end_costs.get(e_id, 0.0)
             k_results.append((path, real_distance))
             if s_id in current_start_costs:
                 current_start_costs[s_id] += POINT_REUSE_PENALTY
@@ -249,6 +231,7 @@ def RenderRoute(route: Route):
     while currentStep.next is not None:
         steps.append(currentStep.point)
         currentStep = currentStep.next
+    steps.append(currentStep.point)
     return steps
 
 
@@ -332,18 +315,19 @@ class BestRoutesView(APIView):
         origin = Point(x_coord=o_x, y_coord=o_y)
         destination = Point(x_coord=d_x, y_coord=d_y)
         points = PointSpatialIndex()
-        o_l = points.query_radius(origin, radius_meters=50.0)
-        d_l = points.query_radius(destination, radius_meters=50.0)
-        if o_l.__len__() == 0:
+        o_l = points.query_radius(origin, radius_meters=400.0)
+        d_l = points.query_radius(destination, radius_meters=400.0)
+        if not o_l:
             o = points.query(origin)
             o_l = [o]
-        if d_l.__len__() == 0:
+        if not d_l:
             d = points.query(destination)
             d_l = [d]
         start_costs = {p.id: DistanceBetween(origin, p) for p in o_l}
         end_costs = {p.id: DistanceBetween(destination, p) for p in d_l}
         start_ids = [p.id for p in o_l]
         end_ids = [p.id for p in d_l]
-        result = calculatePaths(start_ids, end_ids, start_costs, end_costs, 5)
+        result = calculatePaths(start_ids, end_ids, start_costs, end_costs,
+                                5, 200.0)
         renderedResult = convertBestPathsToResponse(result, o_x, o_y, d_x, d_y)
         return Response(renderedResult)
