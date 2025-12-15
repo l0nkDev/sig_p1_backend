@@ -68,6 +68,7 @@ def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
                  for step_id in step_map.keys()}
     predecessors = {}
     entry_count = 0
+    best_result = (None, float('inf'), None, None)
     for step in start_steps:
         walk_cost = start_costs.get(step.point.id, 0.0)
         cost = (walk_cost, 0)
@@ -77,6 +78,8 @@ def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
     EDGE_PENALTY = 100000.0
     while pq:
         current_dist, current_switches, _, current_step_id = heapq.heappop(pq)
+        if current_dist > best_result[1]:
+            continue
         current_step = step_map[current_step_id]
         if (current_dist > distances[current_step_id][0] and
                 current_switches > distances[current_step_id][1]):
@@ -84,10 +87,12 @@ def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
         if current_step.point.id in end_point_ids:
             final_walk = end_costs.get(current_step.point.id, 0.0)
             total_dist = current_dist + final_walk
-            path = reconstruct_path(current_step_id, predecessors, step_map)
-            start_point_id = path[0].point.id
-            end_point_id = current_step.point.id
-            return path, total_dist, start_point_id, end_point_id
+            if total_dist < best_result[1]:
+                path = reconstruct_path(current_step_id, predecessors,
+                                        step_map)
+                best_result = (path, total_dist, path[0].point.id,
+                               current_step.point.id)
+            continue
         if current_step.next:
             neighbor = current_step.next
             weight = current_step.distance_to_next_step()
@@ -115,7 +120,7 @@ def find_best_path(start_steps, end_point_ids, steps_by_point, step_map,
                 heapq.heappush(pq, (new_dist, new_switches,
                                entry_count, switch_neighbor.id))
                 entry_count += 1
-    return None, 0.0, None, None
+    return best_result
 
 
 def calculatePaths(
@@ -147,7 +152,7 @@ def calculatePaths(
     current_end_costs = end_costs.copy()
     POINT_REUSE_PENALTY = 100000.0
     for _ in range(K * 2):
-        path, distance, s_id, e_id = find_best_path(
+        path, search_score, s_id, e_id = find_best_path(
             start_steps,
             end_point_set,
             steps_by_point,
@@ -163,7 +168,13 @@ def calculatePaths(
         if any(tuple(s.id for s in res[0]) == path_ids for res in k_results):
             pass
         else:
-            k_results.append((path, distance))
+            real_distance = start_costs.get(s_id, 0.0)
+            for i in range(len(path) - 1):
+                real_distance += path[i].distance_to_next_step()
+                if path[i].route.id != path[i+1].route.id:
+                    pass
+            real_distance += end_costs.get(e_id, 0.0)     
+            k_results.append((path, real_distance))
             if s_id in current_start_costs:
                 current_start_costs[s_id] += POINT_REUSE_PENALTY
             if e_id in current_end_costs:
@@ -176,12 +187,6 @@ def calculatePaths(
         if len(k_results) >= K:
             break
     return k_results
-
-
-def removePenalties(distance: float) -> float:
-    EDGE_PENALTY = 100000.0
-    num_penalties = int(distance // EDGE_PENALTY)
-    return distance - (num_penalties * EDGE_PENALTY)
 
 
 def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
@@ -232,7 +237,7 @@ def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
                                            Point(x_coord=d_x,
                                                  y_coord=d_y)).data]}
         result.append({
-            "distance": removePenalties(dis),
+            "distance": dis,
             "segments": [originToPoint] + segments + [destinationToPoint]}
                       )
     return result
