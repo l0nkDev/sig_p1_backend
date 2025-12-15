@@ -250,8 +250,10 @@ def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
                                        PointSerializer(
                                            Point(x_coord=d_x,
                                                  y_coord=d_y)).data]}
-        result.append({"distance": removePenalties(
-            dis), "segments": originToPoint + segments + destinationToPoint})
+        result.append({
+            "distance": removePenalties(dis),
+            "segments": [originToPoint] + segments + [destinationToPoint]}
+                      )
     return result
 
 
