@@ -114,6 +114,7 @@ def calculatePaths(
     end_costs: dict,
     K: int = 3,
     switch_cost: float = 0.001,
+    walking_multiplier: float = 5.0
 ) -> list[tuple[list, float]]:
     all_steps = list(Step.objects.select_related(
         'point', 'next__point', 'route').all())
@@ -132,8 +133,10 @@ def calculatePaths(
     end_point_set = set(end_point_ids)
     k_results = []
     penalized_edges = set()
-    current_start_costs = start_costs.copy()
-    current_end_costs = end_costs.copy()
+    current_start_costs = {
+        k: v * walking_multiplier for k, v in start_costs.items()}
+    current_end_costs = {
+        k: v * walking_multiplier for k, v in end_costs.items()}
     POINT_REUSE_PENALTY = 100000.0
     for _ in range(K * 2):
         path, search_score, s_id, e_id = find_best_path(
@@ -221,7 +224,7 @@ def convertBestPathsToResponse(bestPaths, o_x, o_y, d_x, d_y):
         result.append({
             "distance": dis,
             "segments": [originToPoint] + segments + [destinationToPoint]}
-                      )
+        )
     return result
 
 
@@ -328,6 +331,6 @@ class BestRoutesView(APIView):
         start_ids = [p.id for p in o_l]
         end_ids = [p.id for p in d_l]
         result = calculatePaths(start_ids, end_ids, start_costs, end_costs,
-                                5, 200.0)
+                                5, 200.0, 5)
         renderedResult = convertBestPathsToResponse(result, o_x, o_y, d_x, d_y)
         return Response(renderedResult)
